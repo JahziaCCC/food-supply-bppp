@@ -11,7 +11,13 @@ from sources import (
     compute_logistics_pressure_from_ais,
 )
 from scoring import compute_risk_index, compute_level_from_index, compute_trend
-from narrative import fmt_pct, commodity_status_from_pct, build_ai_insight, build_scenarios, build_early_warning_rules
+from narrative import (
+    fmt_pct,
+    commodity_status_from_pct,
+    build_operational_reading,
+    build_early_warning_rules,
+    build_scenarios,
+)
 from telegram_utils import send_telegram
 
 
@@ -38,14 +44,14 @@ def pick_top_pressures(pct_map: Dict[str, Optional[float]], name_map: Dict[str, 
     items.sort(key=lambda x: x[1], reverse=True)
     top = []
     for key, pct in items[:k]:
-        emoji, label = commodity_status_from_pct(pct)
+        _emoji, label = commodity_status_from_pct(pct)
         top.append(f"{name_map.get(key, key)} ({label} {fmt_pct(pct)})")
     return top
 
 
 def fmt_header(now_ksa: dt.datetime) -> str:
     return "\n".join([
-        "🍞📦 رصد سلاسل إمداد الغذاء (B+++ أسبوعي – Level 1) – المملكة العربية السعودية",
+        "🍞📦 رصد سلاسل إمداد الغذاء - المملكة العربية السعودية",
         f"🕒 {now_ksa.strftime('%Y-%m-%d %H:%M')} KSA",
         "",
         "════════════════════",
@@ -55,7 +61,7 @@ def fmt_header(now_ksa: dt.datetime) -> str:
 def build_report() -> Tuple[str, int]:
     now_ksa = dt.datetime.now(tz=KSA_TZ)
 
-    # Optional AIS summary via env var
+    # AIS summary (اختياري)
     ais_summary = None
     if os.getenv("AIS_SUMMARY_JSON"):
         try:
@@ -64,7 +70,7 @@ def build_report() -> Tuple[str, int]:
             ais_summary = None
     logistics_index, logistics_note = compute_logistics_pressure_from_ais(ais_summary)
 
-    # Geo heat via GDELT proxy
+    # حرارة المخاطر من الأخبار
     geo = get_geopolitical_signal()
     geo_heat = int(geo["heat"])
     geo_details = geo["details"]
@@ -77,52 +83,58 @@ def build_report() -> Tuple[str, int]:
     for item in catalog:
         key = item["key"]
         name_map[key] = item["name_ar"]
-        latest, old_price, pct, source_note = fetch_price_history_approx_7d(item)
+        _latest, _old, pct, _src_note = fetch_price_history_approx_7d(item)
         pct_7d[key] = pct
 
-    # Compute unified risk index
+    # حساب المؤشر الموحد
     risk_idx, drivers, triggers = compute_risk_index(pct_7d, logistics_index, geo_heat)
     level, level_label = compute_level_from_index(risk_idx)
 
-    # Trend from state
+    # الاتجاه مقارنة بالسابق
     state = load_state()
     prev_idx = state.get("prev_risk_index")
     trend_symbol, trend_delta = compute_trend(prev_idx, risk_idx)
 
-    # Top pressures
+    # أعلى الضغوط
     top_pressures = pick_top_pressures(pct_7d, name_map, k=3)
-    ai_insight = build_ai_insight(level, top_pressures, triggers)
 
-    # Build report
+    # القراءة التشغيلية (بدون AI wording)
+    reading = build_operational_reading(level, top_pressures, triggers)
+
+    # بناء التقرير
     lines = []
     lines.append(fmt_header(now_ksa))
 
+    # 1) Executive
     lines.append("📊 التقييم التنفيذي")
     lines.append("")
     lines.append(f"📌 مستوى الخطر: {level_label}")
-    lines.append(f"📈 Unified Supply Risk Index: {risk_idx}/100")
+    lines.append(f"📈 مؤشر ضغط الإمداد الموحد: {risk_idx}/100")
     lines.append(f"📊 الاتجاه: {trend_symbol} ({trend_delta:+d})" if prev_idx is not None else f"📊 الاتجاه: {trend_symbol} (+0)")
     lines.append("")
-    lines.append("🧠 AI Operational Insight:")
-    lines.append(ai_insight)
+    lines.append("🧠 القراءة التشغيلية:")
+    lines.append(reading)
     lines.append("")
     lines.append("════════════════════")
 
-    lines.append("🌍 رادار المخاطر العالمية (Proxy)")
+    # 2) Risk Radar
+    lines.append("🌍 رادار المخاطر العالمية")
     lines.append("")
-    lines.append(f"🧾 Geo Heat: {geo_heat}/100")
+    lines.append(f"📊 مؤشر حرارة المخاطر: {geo_heat}/100")
     for d in geo_details[:3]:
         lines.append(f"• {d}")
     lines.append("")
     lines.append("════════════════════")
 
+    # 3) Logistics
     lines.append("🚢 ضغط سلاسل النقل")
     lines.append("")
-    lines.append(f"📊 مؤشر الضغط اللوجستي: {logistics_index}/100")
-    lines.append(f"ℹ️ ملاحظة: {logistics_note}")
+    lines.append(f"📊 مؤشر ضغط النقل: {logistics_index}/100")
+    lines.append(f"ℹ️ {logistics_note}")
     lines.append("")
     lines.append("════════════════════")
 
+    # 4) Commodity Matrix
     lines.append("📦 مصفوفة السلع الاستراتيجية (7 أيام)")
     lines.append("")
     for item in catalog:
@@ -133,6 +145,7 @@ def build_report() -> Tuple[str, int]:
     lines.append("")
     lines.append("════════════════════")
 
+    # 5) Top pressures
     lines.append("🏷️ أعلى السلع ضغطاً (7 أيام)")
     if top_pressures:
         for i, t in enumerate(top_pressures, 1):
@@ -142,15 +155,18 @@ def build_report() -> Tuple[str, int]:
     lines.append("")
     lines.append("════════════════════")
 
+    # 6) Early Warning
     lines.append(build_early_warning_rules())
     lines.append("")
     lines.append("════════════════════")
 
+    # 7) Scenarios
     corn_pct = pct_7d.get("corn")
     lines.append(build_scenarios(level, logistics_index, geo_heat, corn_pct))
     lines.append("")
     lines.append("════════════════════")
 
+    # 8) Recommendation
     lines.append("🧭 توصية غرفة العمليات")
     lines.append("")
     if level == 1:
@@ -160,11 +176,11 @@ def build_report() -> Tuple[str, int]:
         lines.append("• رفع المتابعة إلى مستوى نصف أسبوعي مؤقتاً.")
         lines.append("• مراقبة الذرة/الأعلاف كإشارة مبكرة.")
     else:
-        lines.append("• رفع الجاهزية إلى Level 3 وتفعيل فريق متابعة لوجستي/تجاري.")
-        lines.append("• مراجعة المخزون الاحتياطي وخطط البدائل.")
+        lines.append("• رفع الجاهزية إلى مستوى (3) وتفعيل متابعة مكثفة.")
+        lines.append("• مراجعة البدائل اللوجستية وخطط الاستمرارية.")
     lines.append("")
 
-    # Save state
+    # حفظ الحالة
     state["prev_risk_index"] = risk_idx
     state["last_run_ksa"] = now_ksa.isoformat()
     save_state(state)
@@ -176,7 +192,7 @@ def main() -> None:
     bot = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
-    report, level = build_report()
+    report, _level = build_report()
     print(report)
 
     if bot and chat_id:
