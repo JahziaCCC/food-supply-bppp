@@ -21,6 +21,10 @@ class PricePoint:
     note: Optional[str] = None
 
 
+# =============================
+# أدوات مساعدة
+# =============================
+
 def _safe_float(x: str) -> Optional[float]:
     try:
         v = float(x)
@@ -30,6 +34,10 @@ def _safe_float(x: str) -> Optional[float]:
     except Exception:
         return None
 
+
+# =============================
+# Yahoo Prices
+# =============================
 
 def fetch_yahoo_chart_close(symbol: str) -> Tuple[Optional[float], Optional[str]]:
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=10d&interval=1d"
@@ -65,6 +73,10 @@ def fetch_yahoo_chart_close(symbol: str) -> Tuple[Optional[float], Optional[str]
         return None, "غير متاح"
 
 
+# =============================
+# GDELT
+# =============================
+
 def fetch_gdelt_counts(query: str, hours: int = 168) -> Tuple[Optional[int], str]:
     end = dt.datetime.utcnow()
     start = end - dt.timedelta(hours=hours)
@@ -92,6 +104,10 @@ def fetch_gdelt_counts(query: str, hours: int = 168) -> Tuple[Optional[int], str
         return None, "غير متاح"
 
 
+# =============================
+# Logistics
+# =============================
+
 def compute_logistics_pressure_from_ais(aoi_summary: Optional[dict]) -> Tuple[int, str]:
     if not aoi_summary:
         return 12, "لا توجد تغذية AIS حالياً (خط أساس)"
@@ -116,6 +132,10 @@ def compute_logistics_pressure_from_ais(aoi_summary: Optional[dict]) -> Tuple[in
         return 12, "تعذر تفسير بيانات AIS (خط أساس)"
 
 
+# =============================
+# Commodities
+# =============================
+
 def get_commodities_catalog() -> List[dict]:
     return [
         {"key": "wheat", "name_ar": "القمح", "yahoo": "ZW=F"},
@@ -129,7 +149,6 @@ def get_commodities_catalog() -> List[dict]:
     ]
 
 
-# ===== النسخة النهائية الصحيحة =====
 def fetch_price_history_approx_7d(item: dict):
     """
     يرجع:
@@ -140,12 +159,12 @@ def fetch_price_history_approx_7d(item: dict):
     old_price = None
     pct = None
 
-    # ===== Yahoo =====
+    # Yahoo
     if item.get("yahoo"):
         p, _ = fetch_yahoo_chart_close(item["yahoo"])
         latest_price = p
 
-    # ===== fallback احتياطي =====
+    # fallback
     if latest_price is None:
 
         fallback = {
@@ -164,7 +183,6 @@ def fetch_price_history_approx_7d(item: dict):
         if vals:
             latest_price, old_price = vals
 
-    # ===== حساب نسبة 7 أيام =====
     if latest_price is not None and old_price is not None and old_price != 0:
         pct = ((latest_price - old_price) / old_price) * 100.0
 
@@ -181,18 +199,45 @@ def fetch_price_history_approx_7d(item: dict):
     return point, old_price, pct, "approx_7d"
 
 
+# =============================
+# 🌍 رادار المخاطر العالمي (نسخة قوية)
+# =============================
+
 def get_geopolitical_signal() -> Dict[str, object]:
+
     queries = {
-        "قيود التصدير": "export ban wheat rice",
-        "تعطل الموانئ والشحن": "port closure shipping disruption",
-        "البحر الأسود": "black sea grain export",
+        "قيود التصدير":
+            '(export ban OR export restriction OR "export quota" OR "grain export" OR "food export") '
+            '(wheat OR corn OR rice OR sugar OR barley OR grain OR "vegetable oil" OR قمح OR ذرة OR أرز)',
+
+        "اضطرابات الشحن والممرات":
+            '("shipping disruption" OR "port closure" OR "shipping delay" OR blockade OR attack OR '
+            'تعطل OR اضطراب OR إغلاق OR تأخير) '
+            '("Red Sea" OR "Bab el-Mandeb" OR Suez OR Hormuz OR البحر الأحمر OR باب المندب OR السويس OR هرمز)',
+
+        "مخاطر الغذاء والأسعار":
+            '("food crisis" OR "food security" OR "price spike" OR inflation OR shortage OR '
+            '"supply chain" OR أزمة غذاء OR أمن غذائي OR ارتفاع أسعار OR نقص OR سلاسل الإمداد)',
     }
 
-    heat = 0
     details = []
+    total_score = 0
+
+    weights = {
+        "قيود التصدير": 0.40,
+        "اضطرابات الشحن والممرات": 0.35,
+        "مخاطر الغذاء والأسعار": 0.25,
+    }
+
+    caps = {
+        "قيود التصدير": 400,
+        "اضطرابات الشحن والممرات": 600,
+        "مخاطر الغذاء والأسعار": 800,
+    }
 
     for label, q in queries.items():
-        cnt, _ = fetch_gdelt_counts(q)
+
+        cnt, _ = fetch_gdelt_counts(q, hours=168)
 
         if cnt is None:
             details.append(f"{label}: غير متاح")
@@ -200,13 +245,12 @@ def get_geopolitical_signal() -> Dict[str, object]:
 
         details.append(f"{label}: {cnt}")
 
-        if label == "قيود التصدير":
-            heat += min(40, cnt // 50 * 10)
-        elif label == "تعطل الموانئ والشحن":
-            heat += min(40, cnt // 30 * 10)
-        else:
-            heat += min(20, cnt // 80 * 5)
+        cap = caps[label]
+        ratio = min(1.0, cnt / float(cap))
+        axis_score = int(round(ratio * 100))
 
-    heat = max(0, min(100, heat))
+        total_score += int(round(axis_score * weights[label]))
+
+    heat = max(0, min(100, int(round(total_score))))
 
     return {"heat": heat, "details": details}
