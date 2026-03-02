@@ -97,7 +97,7 @@ def build_report():
 
     lines = []
 
-    lines.append("🍞📦 رصد سلاسل إمداد الغذاء (B++ أسبوعي – Level 1) – المملكة العربية السعودية")
+    lines.append("🍞📦 رصد سلاسل إمداد الغذاء الأسبوعي - المملكة العربية السعودية")
     lines.append(f"🕒 {ts}")
     lines.append("")
     lines.append("════════════════════")
