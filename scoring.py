@@ -55,7 +55,7 @@ def compute_risk_index(
         if max_pct >= 5.0:
             triggers.append("ارتفاع سلعة ≥ +5% خلال 7 أيام")
     else:
-        commodity_total = 10  # baseline عند نقص البيانات
+        commodity_total = 10
         drivers.append("ضغط السلع: بيانات ناقصة — خط أساس 10/60")
 
     # 2) ضغط النقل (0-20)
