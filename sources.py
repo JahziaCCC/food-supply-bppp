@@ -6,7 +6,7 @@ from typing import Dict, Optional, Tuple, List
 import requests
 
 
-# ===== توقيت السعودية (مهم جداً) =====
+# ===== توقيت السعودية =====
 KSA_TZ = dt.timezone(dt.timedelta(hours=3))
 
 
@@ -148,30 +148,47 @@ def compute_logistics_pressure_from_ais(aoi_summary: Optional[dict]) -> Tuple[in
 
 def get_commodities_catalog() -> List[dict]:
     return [
-        {"key": "wheat", "name_ar": "القمح", "stooq": "zw.f", "yahoo": "ZW=F"},
-        {"key": "rice", "name_ar": "الأرز", "stooq": None, "yahoo": "ZR=F"},
-        {"key": "corn", "name_ar": "الذرة", "stooq": "zc.f", "yahoo": "ZC=F"},
-        {"key": "barley", "name_ar": "الشعير", "stooq": None, "yahoo": None},
-        {"key": "veg_oil", "name_ar": "الزيت النباتي", "stooq": None, "yahoo": None},
-        {"key": "sugar", "name_ar": "السكر", "stooq": "sb.f", "yahoo": "SB=F"},
-        {"key": "milk_powder", "name_ar": "حليب بودرة", "stooq": None, "yahoo": None},
-        {"key": "feed", "name_ar": "الأعلاف", "stooq": "zc.f", "yahoo": "ZC=F"},
+        {"key": "wheat", "name_ar": "القمح", "yahoo": "ZW=F"},
+        {"key": "rice", "name_ar": "الأرز", "yahoo": "ZR=F"},
+        {"key": "corn", "name_ar": "الذرة", "yahoo": "ZC=F"},
+        {"key": "barley", "name_ar": "الشعير", "yahoo": None},
+        {"key": "veg_oil", "name_ar": "الزيت النباتي", "yahoo": None},
+        {"key": "sugar", "name_ar": "السكر", "yahoo": "SB=F"},
+        {"key": "milk_powder", "name_ar": "حليب بودرة", "yahoo": None},
+        {"key": "feed", "name_ar": "الأعلاف", "yahoo": "ZC=F"},
     ]
 
 
+# ===== هنا الحل الجديد =====
 def fetch_price_history_approx_7d(item: dict):
+
     latest_price = None
 
+    # المصدر الأساسي
     if item.get("yahoo"):
         p, _ = fetch_yahoo_chart_close(item["yahoo"])
         latest_price = p
+
+    # fallback احتياطي
+    if latest_price is None:
+        fallback_prices = {
+            "wheat": 540,
+            "rice": 15,
+            "corn": 430,
+            "barley": 280,
+            "veg_oil": 920,
+            "sugar": 22,
+            "milk_powder": 3200,
+            "feed": 430,
+        }
+        latest_price = fallback_prices.get(item["key"])
 
     point = PricePoint(
         symbol=item["key"],
         name_ar=item["name_ar"],
         price=latest_price,
         currency="USD",
-        source="Yahoo" if latest_price else "غير متاح",
+        source="Fallback" if latest_price else "غير متاح",
         asof_utc=None,
     )
 
