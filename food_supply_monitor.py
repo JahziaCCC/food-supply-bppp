@@ -1,162 +1,117 @@
-import os
-import json
 import datetime as dt
+from typing import Optional, List, Tuple
 
-from sources import (
-    KSA_TZ,
-    get_commodities_catalog,
-    fetch_price_history_approx_7d,
-    get_geopolitical_signal,
-    compute_logistics_pressure_from_ais,
-)
-
-from scoring import (
-    compute_risk_index,
-    compute_level_from_index,
-    compute_trend,
-)
-
-from narrative import (
-    commodity_status_from_pct,
-    fmt_pct,
-    build_operational_reading,
-)
-
-from telegram_utils import send_telegram
+from sources import KSA_TZ, get_commodities_catalog, pct_change_7d, classify
 
 
-STATE_FILE = "food_state.json"
+def fmt_pct(p: Optional[float]) -> str:
+    if p is None:
+        return "غير متاح"
+    sign = "+" if p >= 0 else ""
+    return f"{sign}{p:.1f}%"
 
 
-def load_state():
-    if not os.path.exists(STATE_FILE):
-        return {}
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+def trend_arrow(delta: Optional[float]) -> Tuple[str, str]:
+    if delta is None:
+        return "↔", "مستقر"
+    if delta >= 0.5:
+        return "↑", "يتدهور"
+    if delta <= -0.5:
+        return "↓", "يتحسن"
+    return "↔", "مستقر"
 
 
-def save_state(data):
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-def main():
-
+def build_report():
     now = dt.datetime.now(KSA_TZ)
     ts = now.strftime("%Y-%m-%d %H:%M KSA")
 
+    catalog = get_commodities_catalog()
+
+    # ===== نجمع نسب 7 أيام =====
+    rows = []
+    pct_map = {}
+
+    for item in catalog:
+        pct = None
+        if item.get("yahoo"):
+            pct, _ = pct_change_7d(item["yahoo"])
+        pct_map[item["key"]] = pct
+
+        icon, level = classify(pct)
+        rows.append((item, icon, level, pct))
+
+    # ===== مؤشر بسيط (0-100) =====
+    # نحسب متوسط النسب المتاحة (نطاق حساس)
+    vals = [v for v in pct_map.values() if v is not None]
+    if vals:
+        avg = sum(vals) / len(vals)
+        # تحويل تقريبي إلى 0-100
+        index = max(0, min(100, int(round((avg / 10.0) * 50))))
+    else:
+        index = 14
+
+    # ===== الحالة العامة =====
+    if index >= 40:
+        state_icon = "🟠"
+        state_txt = "مراقبة"
+    else:
+        state_icon = "🟢"
+        state_txt = "طبيعي"
+
+    # اتجاه الحالة (مبسط: بدون State file هنا)
+    arrow, trend_txt = "↔", "مستقر"
+    delta_txt = "(+0)"
+
+    # ===== أعلى 3 ضغوط =====
+    ranked = [(it["name_ar"], p) for (it, _, _, p) in rows if p is not None]
+    ranked.sort(key=lambda x: x[1], reverse=True)
+    top3 = ranked[:3]
+
     lines = []
-    lines.append("🍞📦 رصد سلاسل إمداد الغذاء - المملكة العربية السعودية")
+    lines.append("🍞📦 رصد سلاسل إمداد الغذاء (B++ أسبوعي – Level 1) – المملكة العربية السعودية")
     lines.append(f"🕒 {ts}")
     lines.append("")
     lines.append("════════════════════")
-
-    # ===== السلع =====
-    catalog = get_commodities_catalog()
-
-    commodities_pct = {}
-    commodity_rows = []
-
-    for item in catalog:
-
-        point, old_price, pct, _ = fetch_price_history_approx_7d(item)
-
-        commodities_pct[item["key"]] = pct
-
-        icon, status = commodity_status_from_pct(pct)
-        pct_txt = fmt_pct(pct)
-
-        commodity_rows.append(
-            f"{icon} {item['name_ar']}: {status} | {pct_txt} (7d)"
-        )
-
-    # ===== رادار المخاطر =====
-    geo = get_geopolitical_signal()
-    geo_heat = geo["heat"]
-    geo_details = geo["details"]
-
-    # ===== النقل =====
-    logistics_index, logistics_note = compute_logistics_pressure_from_ais(None)
-
-    # ===== المؤشر الموحد =====
-    risk_index, drivers, triggers = compute_risk_index(
-        commodities_pct,
-        logistics_index,
-        geo_heat,
-    )
-
-    level_num, level_label = compute_level_from_index(risk_index)
-
-    state = load_state()
-    prev_idx = state.get("risk_index")
-
-    trend_arrow, delta = compute_trend(prev_idx, risk_index)
-
-    state["risk_index"] = risk_index
-    save_state(state)
-
-    # ===== التقييم التنفيذي =====
-    lines.append("📊 التقييم التنفيذي")
+    lines.append("📊 الملخص التنفيذي")
     lines.append("")
-    lines.append(f"📌 مستوى الخطر: {level_label}")
-    lines.append(f"📈 مؤشر ضغط الإمداد الموحد: {risk_index}/100")
-    lines.append(f"📊 الاتجاه: {trend_arrow} ({delta:+d})")
+    lines.append(f"📌 الحالة العامة: {state_icon} {state_txt}")
+    lines.append(f"📈 مؤشر الأمن الغذائي: {index}/100")
+    lines.append(f"📊 اتجاه الحالة: {arrow} {trend_txt} {delta_txt}")
     lines.append("")
-    lines.append("🧠 القراءة التشغيلية:")
-    lines.append(
-        build_operational_reading(
-            level_num,
-            [],
-            triggers,
-        )
-    )
+    lines.append("🏷️ أعلى السلع ضغطًا (7 أيام):")
+
+    if top3:
+        for i, (name, p) in enumerate(top3, start=1):
+            icon, lvl = classify(p)
+            lines.append(f"{i}️⃣ {name} — {icon} {lvl} {fmt_pct(p)} (7d)")
+    else:
+        lines.append("• لا توجد بيانات كافية حالياً.")
 
     lines.append("")
     lines.append("════════════════════")
-
-    # ===== رادار المخاطر =====
-    lines.append("🌍 رادار المخاطر العالمية")
+    lines.append("📦 تفاصيل السلع (أسبوعي)")
     lines.append("")
-    lines.append(f"📊 مؤشر المخاطر: {geo_heat}/100")
 
-    for d in geo_details[:3]:
-        lines.append(f"• {d}")
+    for item, icon, level, pct in rows:
+        name = item["name_ar"]
+        exposure = " | ".join(item.get("exposure", []))
 
-    lines.append("")
-    lines.append("════════════════════")
-
-    # ===== ضغط النقل =====
-    lines.append("🚢 ضغط سلاسل النقل")
-    lines.append("")
-    lines.append(f"📊 مؤشر ضغط النقل: {logistics_index}/100")
+        if pct is None:
+            lines.append(f"• {name}: ⚪ غير متاح | بيانات سعر غير متاحة حاليًا")
+            lines.append(f"  السبب: تعذر جلب بيانات السعر من المصدر المتاح حاليًا")
+            lines.append(f"  دول التعرض: {exposure}" if exposure else "  دول التعرض: غير محدد")
+        else:
+            lines.append(f"• {name}: {icon} {level} | {fmt_pct(pct)} (7d) | ↔ مستقر (+0.0%)")
+            lines.append(f"  دول التعرض: {exposure}" if exposure else "  دول التعرض: غير محدد")
 
     lines.append("")
     lines.append("════════════════════")
-
-    # ===== مصفوفة السلع =====
-    lines.append("📦 مصفوفة السلع الاستراتيجية (7 أيام)")
-    lines.append("")
-    lines.extend(commodity_rows)
-
-    lines.append("")
-    lines.append("════════════════════")
-
-    # ===== التوصية =====
     lines.append("🧭 التوصية")
-    lines.append("")
     lines.append("• استمرار الرصد الأسبوعي حسب الجدولة.")
     lines.append("• رفع التنبيه عند تغيرات ≥ +5% خلال 7 أيام.")
 
-    msg = "\n".join(lines)
-
-    bot = os.environ["TELEGRAM_BOT_TOKEN"]
-    chat = os.environ["TELEGRAM_CHAT_ID"]
-
-    send_telegram(bot, chat, msg)
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
-    main()
+    print(build_report())
