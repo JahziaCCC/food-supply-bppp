@@ -87,7 +87,7 @@ def build_report() -> Tuple[str, int]:
         pct_7d[key] = pct
 
     # حساب المؤشر الموحد
-    risk_idx, drivers, triggers = compute_risk_index(pct_7d, logistics_index, geo_heat)
+    risk_idx, _drivers, triggers = compute_risk_index(pct_7d, logistics_index, geo_heat)
     level, level_label = compute_level_from_index(risk_idx)
 
     # الاتجاه مقارنة بالسابق
@@ -98,14 +98,14 @@ def build_report() -> Tuple[str, int]:
     # أعلى الضغوط
     top_pressures = pick_top_pressures(pct_7d, name_map, k=3)
 
-    # القراءة التشغيلية (بدون AI wording)
+    # القراءة التشغيلية
     reading = build_operational_reading(level, top_pressures, triggers)
 
     # بناء التقرير
     lines = []
     lines.append(fmt_header(now_ksa))
 
-    # 1) Executive
+    # 1) التقييم التنفيذي
     lines.append("📊 التقييم التنفيذي")
     lines.append("")
     lines.append(f"📌 مستوى الخطر: {level_label}")
@@ -117,24 +117,24 @@ def build_report() -> Tuple[str, int]:
     lines.append("")
     lines.append("════════════════════")
 
-    # 2) Risk Radar
+    # 2) رادار المخاطر العالمية
     lines.append("🌍 رادار المخاطر العالمية")
     lines.append("")
     lines.append(f"📊 مؤشر حرارة المخاطر: {geo_heat}/100")
     for d in geo_details[:3]:
-        lines.append(f"• {d}")
+        lines.append(f"• {d}".replace("N/A", "غير متاح"))
     lines.append("")
     lines.append("════════════════════")
 
-    # 3) Logistics
+    # 3) ضغط سلاسل النقل
     lines.append("🚢 ضغط سلاسل النقل")
     lines.append("")
     lines.append(f"📊 مؤشر ضغط النقل: {logistics_index}/100")
-    lines.append(f"ℹ️ {logistics_note}")
+    lines.append(f"ℹ️ {logistics_note}".replace("Baseline (no AIS feed)", "لا توجد تغذية AIS حالياً (خط أساس)"))
     lines.append("")
     lines.append("════════════════════")
 
-    # 4) Commodity Matrix
+    # 4) مصفوفة السلع
     lines.append("📦 مصفوفة السلع الاستراتيجية (7 أيام)")
     lines.append("")
     for item in catalog:
@@ -145,7 +145,7 @@ def build_report() -> Tuple[str, int]:
     lines.append("")
     lines.append("════════════════════")
 
-    # 5) Top pressures
+    # 5) أعلى الضغوط
     lines.append("🏷️ أعلى السلع ضغطاً (7 أيام)")
     if top_pressures:
         for i, t in enumerate(top_pressures, 1):
@@ -155,18 +155,18 @@ def build_report() -> Tuple[str, int]:
     lines.append("")
     lines.append("════════════════════")
 
-    # 6) Early Warning
+    # 6) محرك الإنذار المبكر
     lines.append(build_early_warning_rules())
     lines.append("")
     lines.append("════════════════════")
 
-    # 7) Scenarios
+    # 7) تحليل السيناريوهات
     corn_pct = pct_7d.get("corn")
     lines.append(build_scenarios(level, logistics_index, geo_heat, corn_pct))
     lines.append("")
     lines.append("════════════════════")
 
-    # 8) Recommendation
+    # 8) توصية غرفة العمليات
     lines.append("🧭 توصية غرفة العمليات")
     lines.append("")
     if level == 1:
