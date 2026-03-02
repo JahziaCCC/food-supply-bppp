@@ -31,12 +31,6 @@ def _safe_float(x: str) -> Optional[float]:
         return None
 
 
-def _http_get(url: str, timeout: int = 30) -> str:
-    r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
-    r.raise_for_status()
-    return r.text
-
-
 def fetch_yahoo_chart_close(symbol: str) -> Tuple[Optional[float], Optional[str]]:
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=10d&interval=1d"
 
@@ -135,18 +129,23 @@ def get_commodities_catalog() -> List[dict]:
     ]
 
 
-# ===== النسخة النهائية (تعطي قيم 7 أيام) =====
+# ===== النسخة النهائية الصحيحة =====
 def fetch_price_history_approx_7d(item: dict):
+    """
+    يرجع:
+    point, old_price, pct, note
+    """
 
     latest_price = None
-    past_price = None
+    old_price = None
+    pct = None
 
-    # المصدر الأساسي
+    # ===== Yahoo =====
     if item.get("yahoo"):
         p, _ = fetch_yahoo_chart_close(item["yahoo"])
         latest_price = p
 
-    # fallback احتياطي
+    # ===== fallback احتياطي =====
     if latest_price is None:
 
         fallback = {
@@ -163,18 +162,23 @@ def fetch_price_history_approx_7d(item: dict):
         vals = fallback.get(item["key"])
 
         if vals:
-            latest_price, past_price = vals
+            latest_price, old_price = vals
+
+    # ===== حساب نسبة 7 أيام =====
+    if latest_price is not None and old_price is not None and old_price != 0:
+        pct = ((latest_price - old_price) / old_price) * 100.0
 
     point = PricePoint(
         symbol=item["key"],
         name_ar=item["name_ar"],
         price=latest_price,
         currency="USD",
-        source="Fallback" if latest_price else "غير متاح",
+        source="Fallback" if old_price is not None else ("Yahoo" if latest_price is not None else "غير متاح"),
         asof_utc=None,
+        note=None if latest_price is not None else "بيانات السعر غير متاحة حالياً",
     )
 
-    return point, latest_price, past_price, "approx"
+    return point, old_price, pct, "approx_7d"
 
 
 def get_geopolitical_signal() -> Dict[str, object]:
