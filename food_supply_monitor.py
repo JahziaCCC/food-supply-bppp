@@ -16,9 +16,9 @@ def send_telegram(msg):
         json={
             "chat_id": chat,
             "text": msg,
-            "disable_web_page_preview": True
+            "disable_web_page_preview": True,
         },
-        timeout=30
+        timeout=30,
     )
 
 
@@ -28,7 +28,7 @@ def fetch_price(symbol, fallback_pct=None):
         r = requests.get(
             url,
             timeout=30,
-            headers={"User-Agent": "Mozilla/5.0"}
+            headers={"User-Agent": "Mozilla/5.0"},
         )
         r.raise_for_status()
         data = r.json()
@@ -52,7 +52,7 @@ def fetch_price(symbol, fallback_pct=None):
         if old == 0:
             return fallback_pct
 
-        pct = ((last - old) / old) * 100
+        pct = ((last - old) / old) * 100.0
         return round(pct, 1)
 
     except Exception:
@@ -73,15 +73,53 @@ def build_report():
     now = dt.datetime.now(KSA)
     ts = now.strftime("%Y-%m-%d %H:%M KSA")
 
-    # الرمز + دول التعرض + fallback %
+    # الاسم : (الرمز, دول التعرض, fallback)
     commodities = {
-        "القمح": ("ZW=F", "🇷🇺 روسيا | 🇺🇦 أوكرانيا | 🇹🇷 تركيا | 🇪🇬 مصر", 3.4),
-        "الأرز": ("ZR=F", "🇮🇳 الهند | 🇵🇰 باكستان", 4.9),
-        "الذرة": ("ZC=F", "🇺🇦 أوكرانيا | 🇷🇺 روسيا", 1.9),
-        "الشعير (مؤشر الأعلاف)": ("ZC=F", "🇷🇺 روسيا | 🇺🇦 أوكرانيا", 1.9),
-        "الزيت النباتي": ("ZL=F", "🇮🇩 إندونيسيا | 🇲🇾 ماليزيا", 8.0),
-        "السكر": ("SB=F", "🇧🇷 البرازيل | 🇮🇳 الهند", -1.4),
-        "الأعلاف": ("ZC=F", "🇷🇺 روسيا | 🇺🇦 أوكرانيا", 1.9),
+        "القمح": (
+            "ZW=F",
+            "🇷🇺 روسيا | 🇺🇦 أوكرانيا | 🇹🇷 تركيا | 🇪🇬 مصر",
+            3.4,
+        ),
+        "الأرز": (
+            "ZR=F",
+            "🇮🇳 الهند | 🇵🇰 باكستان",
+            4.9,
+        ),
+        "الذرة": (
+            "ZC=F",
+            "🇺🇦 أوكرانيا | 🇷🇺 روسيا",
+            1.9,
+        ),
+        "الشعير (مؤشر الأعلاف)": (
+            "ZC=F",
+            "🇷🇺 روسيا | 🇺🇦 أوكرانيا",
+            1.9,
+        ),
+        "الشوفان": (
+            "ZO=F",
+            "🇨🇦 كندا | 🇺🇸 الولايات المتحدة",
+            2.0,
+        ),
+        "فول الصويا": (
+            "ZS=F",
+            "🇧🇷 البرازيل | 🇺🇸 الولايات المتحدة | 🇦🇷 الأرجنتين",
+            3.1,
+        ),
+        "الزيت النباتي": (
+            "ZL=F",
+            "🇮🇩 إندونيسيا | 🇲🇾 ماليزيا",
+            8.0,
+        ),
+        "السكر": (
+            "SB=F",
+            "🇧🇷 البرازيل | 🇮🇳 الهند",
+            -1.4,
+        ),
+        "الأعلاف": (
+            "ZC=F",
+            "🇷🇺 روسيا | 🇺🇦 أوكرانيا",
+            1.9,
+        ),
     }
 
     results = []
@@ -108,11 +146,11 @@ def build_report():
     ranked.sort(key=lambda x: x[1], reverse=True)
     top3 = ranked[:3]
 
-    # مؤشر الأمن الغذائي
     vals = [x[1] for x in ranked]
     if vals:
         avg = sum(vals) / len(vals)
-        index = max(0, min(100, int(round((max(vals) / 10.0) * 12 + max(avg, 0) * 2))))
+        max_val = max(vals)
+        index = max(0, min(100, int(round((max_val / 10.0) * 10 + max(avg, 0) * 2))))
     else:
         index = 14
 
